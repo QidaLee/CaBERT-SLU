@@ -2,8 +2,8 @@ import random
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.optim import Adam, RMSprop
-from transformers import BertTokenizer, BertModel, BertConfig, AdamW
+from torch.optim import Adam, RMSprop, AdamW
+from transformers import BertTokenizer, BertModel, BertConfig
 
 from keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
@@ -22,7 +22,7 @@ from config import opt
 def load_data(X, maxlen):
 
     input_ids = pad_sequences(X, maxlen=maxlen, dtype="long", truncating="post", padding="post")
-    
+
     attention_masks = []
     for seq in input_ids:
         seq_mask = [float(i>0) for i in seq]
@@ -30,7 +30,7 @@ def load_data(X, maxlen):
     return (input_ids, attention_masks)
 
 def f1_score_intents(outputs, labels):
-    
+
     P, R, F1, acc = 0, 0, 0, 0
     outputs = torch.sigmoid(outputs)
 
@@ -53,7 +53,7 @@ def f1_score_intents(outputs, labels):
         r = (torch.where(labels[i]==1)[0])
         if len(p) == len(r) and (p == r).all():
             acc += 1
-        
+
     P /= outputs.shape[0]
     R /= outputs.shape[0]
     F1 /= outputs.shape[0]
@@ -63,7 +63,7 @@ def f1_score_intents(outputs, labels):
 ############################################3
 
 def to_spans(l_ids, voc):
-    """Convert a list of BIO labels, coded as integers, into spans identified by a beginning, an end, and a label. 
+    """Convert a list of BIO labels, coded as integers, into spans identified by a beginning, an end, and a label.
        To allow easy comparison later, we store them in a dictionary indexed by the start position.
     @param l_ids: a list of predicted label indices
     @param voc: label vocabulary dictionary: index to label ex. 0: B-C
@@ -74,7 +74,7 @@ def to_spans(l_ids, voc):
     for i, l_id in enumerate(l_ids):
         l = voc[l_id]
 
-        if l[0] == 'B': 
+        if l[0] == 'B':
             # Beginning of a named entity: B-something.
             if current_lbl:
                 # If we're working on an entity, close it.
@@ -124,7 +124,7 @@ def compare(gold, pred, stats, mode='strict'):
     for start, (lbl, end) in pred.items():
         stats['total']['pred'] += 1
         stats[lbl]['pred'] += 1
-    
+
     if mode == 'strict':
         for start, (glbl, gend) in gold.items():
             if start in pred:
@@ -132,7 +132,7 @@ def compare(gold, pred, stats, mode='strict'):
                 if glbl == plbl and gend == pend:
                     stats['total']['corr'] += 1
                     stats[glbl]['corr'] += 1
-    
+
     elif mode == 'partial':
         for gstart, (glbl, gend) in gold.items():
             for pstart, (plbl, pend) in pred.items():

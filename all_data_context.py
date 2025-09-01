@@ -16,12 +16,12 @@ class Turns:
 
     def load_data(self, X):
         input_ids = pad_sequences(X, maxlen=60, dtype="long", truncating="post", padding="post")
-        
+
         attention_masks = []
         for seq in input_ids:
             seq_mask = [float(i>0) for i in seq]
             attention_masks.append(seq_mask)
-        
+
         return input_ids, attention_masks
 
 class CoreDataset(Dataset):
@@ -36,22 +36,22 @@ class CoreDataset(Dataset):
 
         self.X_turns, self.Y_turns = self.postprocess()
         self.num_data = sum([len(turn.token_ids) for turn in self.X_turns])
-    
+
     def postprocess(self):
-        
+
         dialogs = []
         y_slots = []
         y_labels = []
-        
+
         for dialog in self.data:
             utts, slots, labels = zip(*dialog)
             dialogs.append(utts)
             y_slots.append(slots)
             y_labels.append(labels)
 
-        X_turns = np.array([Turns(turns, slots) for turns, slots in zip(dialogs, y_slots)])
-        Y_turns = np.array(y_labels)
-        
+        X_turns = np.array([Turns(turns, slots) for turns, slots in zip(dialogs, y_slots)], dtype=object)
+        Y_turns = np.array(y_labels, dtype=object)
+
         return X_turns, Y_turns
 
     def __getitem__(self, index):
@@ -65,7 +65,7 @@ class CoreDataset(Dataset):
             new_labels[i] = label
 
         return self.X_turns[index], new_labels
-        
+
     def __len__(self):
         return len(self.X_turns)
 
@@ -76,7 +76,7 @@ def collate_fn(batch):
 
     lengths = [i.token_ids.shape[0] for i in X_turns]
     lengths = t.LongTensor(lengths)
-    
+
     max_len = max([i.token_ids.shape[0] for i in X_turns])
     max_dim = max([i.token_ids.shape[1] for i in X_turns])
     result_ids = t.zeros((len(X_turns), max_len, max_dim)).long()
@@ -100,15 +100,15 @@ def collate_fn(batch):
 def get_dataloader_context(data, dic, slot_dic, opt):
     dataset = CoreDataset(data, dic, slot_dic, opt)
     batch_size = opt.batch_size
-    return DataLoader(dataset, 
-                      batch_size=batch_size, 
+    return DataLoader(dataset,
+                      batch_size=batch_size,
                       shuffle=False,
                       collate_fn= lambda x: collate_fn(x))
 
 ######################################################################
 
 if __name__ == '__main__':
-    
+
     with open(opt.dic_path_with_tokens, 'rb') as f:
         dic = pickle.load(f)
     with open(opt.slot_path, 'rb') as f:
@@ -118,8 +118,10 @@ if __name__ == '__main__':
     np.random.seed(0)
 
     indices = np.arange(len(train_data)) #np.random.permutation(len(train_data))
-    train = np.array(train_data)[indices[:int(len(train_data)*0.7)]]
-    test = np.array(train_data)[indices[int(len(train_data)*0.7):]]
+    train = np.array(train_data, dtype=object)[
+        indices[:int(len(train_data)*0.7)]]
+    test = np.array(train_data, dtype=object)[
+        indices[int(len(train_data)*0.7):]]
 
     train_loader = get_dataloader_context(train, dic, slot_dic, opt)
 
@@ -130,5 +132,3 @@ if __name__ == '__main__':
         print(lengths[0])
         print(result_slot_labels[0])
         print(result_labels[0])
-        dae
-    

@@ -1,11 +1,11 @@
 """For model training and inference (multi dialogue act & slot detection)
 """
-import random
+import os
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.optim import Adam, RMSprop
-from transformers import BertTokenizer, BertModel, BertConfig, AdamW
+from torch.optim import Adam, RMSprop, AdamW
+from transformers import BertTokenizer, BertModel, BertConfig
 
 from keras.preprocessing.sequence import pad_sequences
 from sklearn.model_selection import train_test_split
@@ -22,12 +22,12 @@ from config import opt
 from utils import *
 
 def train(**kwargs):
-    
+
     # attributes
     for k, v in kwargs.items():
         setattr(opt, k, v)
     np.random.seed(0)
-    
+
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     torch.backends.cudnn.enabled = False
 
@@ -46,9 +46,11 @@ def train(**kwargs):
 
     # Microsoft Dialogue Dataset / SGD Dataset
     indices = np.random.permutation(len(train_data))
-    train = np.array(train_data)[indices[:int(len(train_data)*0.7)]]#[:1000]
-    test = np.array(train_data)[indices[int(len(train_data)*0.7):]]#[:100]
-    
+    train = np.array(train_data, dtype=object)[
+        indices[:int(len(train_data)*0.7)]]  # [:1000]
+    test = np.array(train_data, dtype=object)[
+        indices[int(len(train_data)*0.7):]]  # [:100]
+
     train_loader = get_dataloader_context(train, dic, slot_dic, opt)
     val_loader = get_dataloader_context(test, dic, slot_dic, opt)
 
@@ -61,14 +63,14 @@ def train(**kwargs):
         intent_tokens[i] = torch.tensor(intent_tok[i])
     for i in range(len(mask_tok)):
         mask_tokens[i] = torch.tensor(mask_tok[i])
-    
+
     # model
     config = BertConfig(vocab_size_or_config_json_file=32000, hidden_size=768,
         num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072)
-    
+
     model = BertContextNLU(config, opt, len(dic), len(slot_dic))
     # model = ECA(opt, len(dic), len(slot_dic))
-    
+
     if opt.model_path:
         model.load_state_dict(torch.load(opt.model_path))
         print("Pretrained model has been loaded.\n")
@@ -112,7 +114,7 @@ def train(**kwargs):
             train_loss = criterion(outputs, labels)
             slot_loss = criterion2(slot_out, result_slot_labels)
             total_loss = train_loss + slot_loss
-            
+
             total_loss.backward()
             optimizer.step()
 
@@ -130,7 +132,7 @@ def train(**kwargs):
         f1 = total_F1 / ccounter
         print(f'P = {precision:.4f}, R = {recall:.4f}, F1 = {f1:.4f}')
         print('Accuracy: ', total_acc/train_loader.dataset.num_data)
-        
+
 
         # Validation Phase
         total_val_loss = 0
@@ -150,7 +152,7 @@ def train(**kwargs):
             result_slot_labels = result_slot_labels.to(device)
             result_slot_labels = result_slot_labels.reshape(-1)
             result_labels = result_labels.to(device)
-            
+
             with torch.no_grad():
                 outputs, labels, predicted_slot_outputs  = model(result_ids, result_token_masks, result_masks, lengths, result_slot_labels, result_labels, intent_tokens, mask_tokens)
             val_loss = criterion(outputs, labels)
@@ -180,7 +182,7 @@ def train(**kwargs):
         p_slot, r_slot, f1_slot = prf(stats['total'])
         print('========= Slot =========')
         print(f'Slot Score: P = {p_slot:.4f}, R = {r_slot:.4f}, F1 = {f1_slot:.4f}')
-        
+
         if f1 > best_f1:
             print('saving with loss of {}'.format(total_val_loss),
                   'improved over previous {}'.format(best_loss))
@@ -189,8 +191,10 @@ def train(**kwargs):
             best_f1 = f1
             best_stats = copy.deepcopy(stats)
 
+            model_dir = "checkpoints"
+            os.makedirs(model_dir, exist_ok=True)
             torch.save(model.state_dict(), 'checkpoints/best_{}_{}.pth'.format(opt.datatype, opt.data_mode))
-        
+
         print()
     print('Best total val loss: {:.4f}'.format(total_val_loss))
     print('Best Test Accuracy: {:.4f}'.format(best_accuracy))
@@ -229,11 +233,11 @@ def test(**kwargs):
     with open(opt.test_path, 'rb') as f:
         test_data = pickle.load(f)
 
-    
     # Microsoft Dialogue Dataset / SGD Dataset
     indices = np.random.permutation(len(train_data))
-    train = np.array(train_data)[indices[:int(len(train_data)*0.7)]]
-    test = np.array(train_data)[indices[int(len(train_data)*0.7):]][:1000]
+    train = np.array(train_data, dtype=object)[indices[:int(len(train_data)*0.7)]]
+    test = np.array(train_data, dtype=object)[
+        indices[int(len(train_data)*0.7):]][:1000]
 
     train_loader = get_dataloader_context(train, dic, slot_dic, opt)
     test_loader = get_dataloader_context(test, dic, slot_dic, opt)
@@ -247,11 +251,11 @@ def test(**kwargs):
         intent_tokens[i] = torch.tensor(intent_tok[i])
     for i in range(len(mask_tok)):
         mask_tokens[i] = torch.tensor(mask_tok[i])
-    
+
     # model
     config = BertConfig(vocab_size_or_config_json_file=32000, hidden_size=768,
         num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072)
-    
+
     model = BertContextNLU(config, opt, len(dic), len(slot_dic))
 
     if opt.model_path:
@@ -259,10 +263,10 @@ def test(**kwargs):
         print("Pretrained model {} has been loaded.".format(opt.model_path))
     model = model.to(device)
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    
+
     # Run multi-intent validation
     if opt.test_mode == "validation":
-        
+
         total_P = 0
         total_R = 0
         total_F1 = 0
@@ -279,7 +283,7 @@ def test(**kwargs):
             result_slot_labels = result_slot_labels.to(device)
             result_slot_labels = result_slot_labels.reshape(-1)
             result_labels = result_labels.to(device)
-            
+
             with torch.no_grad():
                 outputs, labels, predicted_slot_outputs  = model(result_ids, result_token_masks, result_masks, lengths, result_slot_labels, result_labels, intent_tokens, mask_tokens)
 
@@ -303,7 +307,7 @@ def test(**kwargs):
         p_slot, r_slot, f1_slot = prf(stats['total'])
         print('========= Slot =========')
         print(f'Slot Score: P = {p_slot:.4f}, R = {r_slot:.4f}, F1 = {f1_slot:.4f}')
-    
+
     # Run test classification
     elif opt.test_mode == "data":
 
@@ -332,7 +336,7 @@ def test(**kwargs):
             for i in range(len(result_ids)):
                 texts_no_pad.append(result_ids[i,:lengths[i],:])
             texts_no_pad = torch.vstack(texts_no_pad)
-            
+
             with torch.no_grad():
                 outputs, labels, predicted_slot_outputs, ffscores  = model(result_ids, result_token_masks, result_masks, lengths, result_slot_labels, result_labels, intent_tokens, mask_tokens)
 
@@ -342,7 +346,7 @@ def test(**kwargs):
                 total_R += R
                 total_F1 += F1
                 total_acc += acc
-                
+
                 ccounter += 1
 
                 _, index = torch.topk(predicted_slot_outputs, k=1, dim=-1)
@@ -384,28 +388,3 @@ def test(**kwargs):
 if __name__ == '__main__':
     import fire
     fire.Fire()
-    
-
-
-            
-
-
-
-
-
-
-
-
-        
-
-
-
-
-
-
-
-
-    
-
-
-    

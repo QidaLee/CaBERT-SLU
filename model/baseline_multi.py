@@ -6,17 +6,17 @@ import numpy as np
 from transformers import BertTokenizer, BertModel
 
 class MULTI(nn.Module):
-    
+
     def __init__(self, opt, num_labels=2, num_slot_labels=10):
         super(MULTI, self).__init__()
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
 
         self.embedding = nn.Embedding(len(self.tokenizer.vocab), 64)
-        self.rnn_sentence = nn.LSTM(input_size=64, 
+        self.rnn_sentence = nn.LSTM(input_size=64,
                            hidden_size=64,
                            bidirectional=True,
-                           batch_first=True, 
+                           batch_first=True,
                            num_layers=1)
         self.decoder = AttnDecoderRNN(64, opt)
         self.slot_decoder = AttnDecoderRNN(64, opt)
@@ -30,11 +30,11 @@ class MULTI(nn.Module):
         #self.dropout = nn.Dropout(0.1)
         self.num_labels = num_labels
         self.num_slot_labels = num_slot_labels
-        
+
         self.opt = opt
 
     def forward(self, x_inputs):
-        
+
         # Encoder
         X = self.embedding(x_inputs)
         rnn_out, encoder_hidden = self.rnn_sentence(X)
@@ -45,7 +45,7 @@ class MULTI(nn.Module):
         # Decoder
         decoder_hidden = encoder_hidden
         decoder_outputs = torch.zeros(*rnn_out.shape, device=self.device)
-        
+
         for di in range(x_inputs.shape[1]):
             decoder_output, decoder_hidden = self.decoder(decoder_hidden, rnn_out, di)
             decoder_outputs[:,di,:] = decoder_output.squeeze(1)
@@ -55,7 +55,7 @@ class MULTI(nn.Module):
         # Slot Decoder
         decoder_hidden = encoder_hidden
         slot_outputs = torch.zeros(*rnn_out.shape, device=self.device)
-        
+
         for di in range(x_inputs.shape[1]):
             decoder_output, decoder_hidden = self.slot_decoder(decoder_hidden, rnn_out, di)
             slot_outputs[:,di,:] = decoder_output.squeeze(1)
@@ -73,17 +73,17 @@ class AttnDecoderRNN(nn.Module):
 
         self.attn = nn.Linear(self.hidden_size * 4, 1)
         self.attn_combine = nn.Linear(self.hidden_size * 4, self.hidden_size)
-        self.rnn_token = nn.LSTM(input_size=self.hidden_size, 
+        self.rnn_token = nn.LSTM(input_size=self.hidden_size,
                            hidden_size=self.hidden_size,
                            bidirectional=True,
-                           batch_first=True, 
+                           batch_first=True,
                            num_layers=1)
-        
+
         self.W = nn.Parameter(torch.zeros(self.hidden_size*2,1))
         self.v = nn.Parameter(torch.zeros(1))
 
     def forward(self, hidden, encoder_outputs, di):
-        
+
         b, t, h = encoder_outputs.shape
 
         # repeat decoder hidden
@@ -112,4 +112,3 @@ class AttnDecoderRNN(nn.Module):
         output, hidden = self.rnn_token(output, hidden)
 
         return output, hidden
-     

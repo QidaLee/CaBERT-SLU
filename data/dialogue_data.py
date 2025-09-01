@@ -9,9 +9,9 @@ import json
 import os
 import csv
 import spacy
-from nltk.tokenize import word_tokenize 
+from nltk.tokenize import word_tokenize
 from transformers import BertTokenizer, BertModel, BertForMaskedLM
-import time 
+import time
 
 class Data:
 
@@ -27,7 +27,7 @@ class Data:
     #==================================================#
     #                   Text Prepare                   #
     #==================================================#
-    
+
     #pure virtual function
     def prepare_text(self):
         raise NotImplementedError("Please define virtual function!!")
@@ -35,10 +35,10 @@ class Data:
     # prepare text
     def text_prepare(self, text, mode):
         """
-            text: a string       
+            text: a string
             return: modified string
         """
-        
+
         text = text.lower() # lowercase text
         text = re.sub(self.REPLACE_BY_SPACE_RE, ' ', text) # replace REPLACE_BY_SPACE_RE symbols by space in text
         text = re.sub(self.BAD_SYMBOLS_RE, '', text) # delete symbols which are in BAD_SYMBOLS_RE from text
@@ -63,7 +63,7 @@ class E2EData(Data):
         self.slot2id_path = slot2id_path
         self.train_data, self.intent2id, self.slot2id = self.prepare_dialogue(done)
         self.num_labels = len(self.intent2id)
-    
+
     def get_tags(self, slot_name, string):
         tags = []
         slot_words = word_tokenize(string.lower())
@@ -76,7 +76,7 @@ class E2EData(Data):
             return slot_words[0], (tags, ' '.join(slot_words))
         else:
             return None, None
-    
+
     def modify_slots(self, slots):
         slot_dic = {}
         for slot_pair in slots:
@@ -95,7 +95,7 @@ class E2EData(Data):
                         if key:
                             slot_dic[key] = value
         return slot_dic
-    
+
     def text_prepare_tag(self, tokens, text_labels):
         """Auxiliary function for parsing tokens.
         @param tokens: raw tokens
@@ -116,12 +116,12 @@ class E2EData(Data):
                 labels.extend(['I-'+label[2:]] * (n_subwords-1))
             else:
                 labels.extend([label] * n_subwords)
-        
+
         tokenized_ids = self.tokenizer.convert_tokens_to_ids(['[CLS]']+tokenized_sentence+['[SEP]'])
         labels = ['[PAD]']+labels+['[PAD]']
 
         return tokenized_sentence, tokenized_ids, labels
-    
+
     def prepare(self, data_path, intent2id, counter, slot2id, scounter):
 
         print('Parsing file: ', data_path)
@@ -131,11 +131,11 @@ class E2EData(Data):
         prev_id = '1'
 
         with open(self.data_path+data_path, 'r') as f:
-        
+
             for i, line in enumerate(f):
                 if i == 0:
                     continue
-                
+
                 infos = line.split('\t')
                 dialogue_id = infos[0]
                 message_id = infos[1]
@@ -149,14 +149,14 @@ class E2EData(Data):
                     s = re.findall('\((.*)\)', act)
                     if s:
                         slots.append(s[0].split(';'))
-                
+
                 ############################### single intent ###############################
                 # intents = "@".join(sorted(intents))
                 # if intents not in intent2id:
                 #     intent2id[intents] = counter
                 #     counter += 1
                 # intents = intent2id[intents]
-                
+
                 ############################### multi intents ###############################
                 for intent in intents:
                     if intent not in intent2id:
@@ -189,12 +189,12 @@ class E2EData(Data):
                         else:
                             final_tags.append('O')
                             cc += 1
-                
+
                 if data and prev_id != dialogue_id:
                     all_data.append(data)
                     data = []
                     prev_id = dialogue_id
-                
+
                 utt, utt_ids, final_tags = self.text_prepare_tag(text, final_tags)
 
                 ############################ slots conver to ids ###################################
@@ -208,16 +208,16 @@ class E2EData(Data):
                 data.append((utt_ids, slots_ids, intents))
                 # data.append((utt, utt_ids, final_tags, slots_ids, intents))
                 # data.append((text, intents, slots))
-        
+
         return all_data, counter, scounter
-    
+
     def prepare_dialogue(self, done):
         """
         train_data:
-        
+
         a list of dialogues
         for each dialogue:
-            [(sent1, [label1, label2], [slot1, slot2]), 
+            [(sent1, [label1, label2], [slot1, slot2]),
              (sent2, [label2], [slot2]),...]
         """
 
@@ -229,7 +229,7 @@ class E2EData(Data):
             with open(self.slot2id_path, "rb") as f:
                 slot2id = pickle.load(f)
             return train_data, intent2id, slot2id
-        
+
         ptime = time.time()
 
         # if os.path.exists(self.intent2id_path):
@@ -241,21 +241,21 @@ class E2EData(Data):
         counter = 0
         slot2id = {}
         scounter = 0
-        
+
         all_data = []
         for data_path in os.listdir(self.data_path):
             data, counter, scounter = self.prepare(data_path, intent2id, counter, slot2id, scounter)
             all_data += data
-        
+
         with open(self.rawdata_path, "wb") as f:
             pickle.dump(all_data, f)
         with open(self.intent2id_path, "wb") as f:
             pickle.dump(intent2id, f)
         with open(self.slot2id_path, "wb") as f:
             pickle.dump(slot2id, f)
-        
+
         print("Process time: ", time.time()-ptime)
-        
+
         return all_data, intent2id, slot2id
 
 
@@ -272,7 +272,7 @@ class SGDData(Data):
         self.train_data, self.intent2id, self.slot2id, self.turn_data_all = self.prepare_dialogue(done)
         self.num_labels = len(self.intent2id)
         self.num_slot_labels = len(self.slot2id)
-    
+
     def build_ids(self, items, item2id, counter):
         for item in items:
             if item not in item2id:
@@ -280,7 +280,7 @@ class SGDData(Data):
                 counter += 1
         items = [item2id[item][0] for item in items]
         return items, item2id, counter
-    
+
     def get_tags(self, slot_name, string):
         tags = []
         slot_words = word_tokenize(string.lower())
@@ -293,7 +293,7 @@ class SGDData(Data):
             return slot_words[0], (tags, ' '.join(slot_words))
         else:
             return None, None
-    
+
     def text_prepare_tag(self, tokens, text_labels):
         """Auxiliary function for parsing tokens.
         @param tokens: raw tokens
@@ -314,21 +314,21 @@ class SGDData(Data):
                 labels.extend(['I-'+label[2:]] * (n_subwords-1))
             else:
                 labels.extend([label] * n_subwords)
-        
+
         tokenized_ids = self.tokenizer.convert_tokens_to_ids(['[CLS]']+tokenized_sentence+['[SEP]'])
         labels = ['[PAD]']+labels+['[PAD]']
 
         return tokenized_sentence, tokenized_ids, labels
-    
+
     def prepare_dialogue(self, done):
         """
         train_data:
-        
+
         a list of dialogues (utterance-level)
         for each dialogue:
-            [(sent1, [label1, label2], [slot1, slot2]), 
+            [(sent1, [label1, label2], [slot1, slot2]),
              (sent2, [label2], [slot2]),...]
-        
+
         a list of dialogues (turn-level)
         for each dialogue:
             [(turn1, intents1, requested_slots1, slots1, values1),...
@@ -345,7 +345,7 @@ class SGDData(Data):
             with open(self.turn_path, "rb") as f:
                 turn_data_all = pickle.load(f)
             return train_data, intent2id, slot2id, turn_data_all
-        
+
         ptime = time.time()
 
         # if os.path.exists(self.intent2id_path):
@@ -355,7 +355,7 @@ class SGDData(Data):
         # else:
         intent2id = {}
         counter = 0
-        
+
         aintent2id = {}
         acounter = 0
         request2id = {}
@@ -368,7 +368,7 @@ class SGDData(Data):
         services = []
 
         for file in sorted(os.listdir(self.data_path))[:-1]:
-            
+
             with open(os.path.join(self.data_path, file), 'r') as f:
                 print('Parsing file: ', file)
                 raw_data = json.load(f)
@@ -393,7 +393,7 @@ class SGDData(Data):
                         for action in turns['frames'][0]['actions']:
                             intents.append(action['act'])
                             slots.append((action['slot'], action['values']))
-                        
+
                         intents = list(set(intents))
 
                         # single intent
@@ -402,7 +402,7 @@ class SGDData(Data):
                         #     intent2id[intents] = counter
                         #     counter += 1
                         # intents = intent2id[intents]
-                        
+
                         ###################### multi intents ######################
                         for intent in intents:
                             if intent not in intent2id:
@@ -431,7 +431,7 @@ class SGDData(Data):
                                 key, value = self.get_tags(slot_name, slot_words)
                                 if key:
                                     slot_dic[key] = value
-                            
+
                             final_tags = []
                             rc = 0
                             for i, word in enumerate(utt_token):
@@ -443,7 +443,7 @@ class SGDData(Data):
                                 else:
                                     final_tags.append('O')
                                     rc += 1
-                        
+
                         utt, utt_ids, final_tags = self.text_prepare_tag(utt_token, final_tags)
 
                         ############################ slots conver to ids ###################################
@@ -465,7 +465,7 @@ class SGDData(Data):
                                 v_turn = []
                             else:
                                 s_turn, v_turn = zip(*[(k,v[0]) for k, v in slot_values.items()])
-                            
+
                             encoded = self.tokenizer.encode_plus(prev_text, text_pair=turns['utterance'], return_tensors='pt')
                             aintents, aintent2id, acounter = self.build_ids([turns['frames'][0]['state']['active_intent']], aintent2id, acounter)
                             requests, request2id, rcounter = self.build_ids(turns['frames'][0]['state']['requested_slots'], request2id, rcounter)
@@ -476,11 +476,11 @@ class SGDData(Data):
                             prev_text = turns['utterance']
                             prev_data = data[-1]
 
-                    
+
                     all_data.append(data)
                     all_data_turn.append(data_turn)
                     services.append(dialogue['services'])
-        
+
         with open(self.rawdata_path, "wb") as f:
             pickle.dump(all_data, f)
         with open(self.intent2id_path, "wb") as f:
@@ -494,12 +494,12 @@ class SGDData(Data):
                          'request2id': request2id}
         with open(self.turn_path, "wb") as f:
             pickle.dump(turn_data_all, f)
-        
+
         print("Process time: ", time.time()-ptime)
-        
+
         return all_data, intent2id, slot2id, turn_data_all
-    
-    
+
+
 if __name__ == "__main__":
 
     if not os.path.exists('e2e_dialogue/'):

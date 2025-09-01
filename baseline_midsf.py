@@ -23,12 +23,12 @@ from config import opt
 from utils import *
 
 def train(**kwargs):
-    
+
     # attributes
     for k, v in kwargs.items():
         setattr(opt, k, v)
     np.random.seed(0)
-    
+
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     torch.backends.cudnn.enabled = False
 
@@ -66,16 +66,18 @@ def train(**kwargs):
                 counter += 1
             dialogue_counter += 1
         indices = np.random.permutation(len(all_data))
-        train = np.array(all_data)[indices[:int(len(all_data)*0.7)]]#[:10000]
-        test = np.array(all_data)[indices[int(len(all_data)*0.7):]]#[:100]
-    
+        train = np.array(all_data, dtype=object)[
+            indices[:int(len(all_data)*0.7)]]  # [:10000]
+        test = np.array(all_data, dtype=object)[
+            indices[int(len(all_data)*0.7):]]  # [:100]
+
     train_loader = get_dataloader(train, len(dic), len(slot_dic), opt)
     val_loader = get_dataloader(test, len(dic), len(slot_dic), opt)
-    
+
     # model
     config = BertConfig(vocab_size_or_config_json_file=32000, hidden_size=768,
         num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072)
-    
+
     model = MULTI(opt, len(dic), len(slot_dic))
     if opt.model_path:
         model.load_state_dict(torch.load(opt.model_path))
@@ -155,7 +157,7 @@ def train(**kwargs):
         f1 = total_F1 / ccounter
         print(f'P = {precision:.4f}, R = {recall:.4f}, F1 = {f1:.4f}')
         print('Accuracy: ', total_acc/train_loader.dataset.num_data)
-        
+
 
         # Validation Phase
         total_val_loss = 0
@@ -173,7 +175,7 @@ def train(**kwargs):
             labels = labels.to(device)
             slot_labels = slot_labels.to(device)
             slot_labels = slot_labels.reshape(-1)
-            
+
             with torch.no_grad():
                 encoder_logits, decoder_logits, slot_logits = model(captions_t)
             val_loss = criterion(encoder_logits, labels)
@@ -212,7 +214,7 @@ def train(**kwargs):
         #     if label != 'total':
         #         p, r, f1 = prf(stats[label])
         #         print(f'{label:4s}: P = {p:.4f}, R = {r:.4f}, F1 = {f1:.4f}')
-        
+
         if f1 > best_f1:
             print('saving with loss of {}'.format(total_val_loss),
                   'improved over previous {}'.format(best_loss))
@@ -222,7 +224,7 @@ def train(**kwargs):
             best_stats = copy.deepcopy(stats)
 
             torch.save(model.state_dict(), 'checkpoints/best_{}_{}_baseline.pth'.format(opt.datatype, opt.data_mode))
-        
+
         print()
     print('Best total val loss: {:.4f}'.format(total_val_loss))
     print('Best Test Accuracy: {:.4f}'.format(best_accuracy))
@@ -282,16 +284,16 @@ def test(**kwargs):
                 counter += 1
             dialogue_counter += 1
         indices = np.random.permutation(len(all_data))
-        X_train = np.array(all_data)[indices[:int(len(all_data)*0.7)]]#[:10000]
-        X_test = np.array(all_data)[indices[int(len(all_data)*0.7):]]#[:100]
+        X_train = np.array(all_data, dtype=object)[indices[:int(len(all_data)*0.7)]]#[:10000]
+        X_test = np.array(all_data, dtype=object)[indices[int(len(all_data)*0.7):]]#[:100]
 
     X_train, mask_train = load_data(X_train)
     X_test, mask_test = load_data(X_test)
-    
+
     # model
     config = BertConfig(vocab_size_or_config_json_file=32000, hidden_size=768,
         num_hidden_layers=12, num_attention_heads=12, intermediate_size=3072)
-    
+
     model = MULTI(opt, len(dic), len(slot_dic))
     if opt.model_path:
         model.load_state_dict(torch.load(opt.model_path))
@@ -301,13 +303,13 @@ def test(**kwargs):
 
     # Store embeddings
     if opt.test_mode == "embedding":
-        
+
         train_loader = get_dataloader(X_train, y_train, mask_train, opt)
 
         results = collections.defaultdict(list)
         model.eval()
         for i, (captions_t, labels, masks) in enumerate(train_loader):
-            
+
             captions_t = captions_t.to(device)
             labels = labels.to(device)
             masks = masks.to(device)
@@ -317,20 +319,20 @@ def test(**kwargs):
 
                 for ii in range(len(labels)):
                     key = labels[ii].data.cpu().item()
-                    
+
                     embedding = pooled_output[ii].data.cpu().numpy().reshape(-1)
                     word_embeddings = hidden_states[-1][ii].data.cpu().numpy()
-                    
+
                     tokens = tokenizer.convert_ids_to_tokens(captions_t[ii].data.cpu().numpy())
                     tokens = [token for token in tokens if token != "[CLS]" and token != "[SEP]" and token != "[PAD]"]
                     original_sentence = " ".join(tokens)
                     results[key].append((original_sentence, embedding, word_embeddings))
 
         torch.save(results, embedding_path)
-    
+
     # Run test classification
     elif opt.test_mode == "data":
-        
+
         # Single instance
         # index = np.random.randint(0, len(X_test), 1)[0]
         # input_ids = X_test[index]
@@ -346,7 +348,7 @@ def test(**kwargs):
 
         # Validation Phase
         test_loader = get_dataloader(X_test, y_test, mask_test, len(dic), opt)
-        
+
         error_ids = []
         pred_labels = []
         real_labels = []
@@ -359,7 +361,7 @@ def test(**kwargs):
             captions_t = captions_t.to(device)
             labels = labels.to(device)
             masks = masks.to(device)
-            
+
             with torch.no_grad():
                 _, pooled_output, outputs = model(captions_t, masks)
                 co, to = calc_score(outputs, labels)
@@ -396,7 +398,7 @@ def test(**kwargs):
         test_acc = test_corrects.double() / test_loader.dataset.num_data if opt.data_mode == 'single' else test_corrects.double() / totals
         print('Test accuracy: {:.4f}'.format(test_acc))
 
-    
+
     # User defined
     elif opt.test_mode == "user":
         while True:
@@ -407,7 +409,7 @@ def test(**kwargs):
             text = "[CLS] " + text + " [SEP]"
             tokenized_text = tokenizer.tokenize(text)
             tokenized_ids = np.array(tokenizer.convert_tokens_to_ids(tokenized_text))[np.newaxis,:]
-            
+
             input_ids = pad_sequences(tokenized_ids, maxlen=opt.maxlen, dtype="long", truncating="post", padding="post").squeeze(0)
             attention_masks = [float(i>0) for i in input_ids]
 
@@ -416,39 +418,9 @@ def test(**kwargs):
             with torch.no_grad():
                 pooled_output, outputs = model(captions_t, mask)
             print("Predicted label: ", reverse_dic[torch.max(outputs, 1)[1].item()])
-            print("=================================")    
-    
-    
-
-
-
+            print("=================================")
 
 
 if __name__ == '__main__':
     import fire
     fire.Fire()
-    
-
-
-            
-
-
-
-
-
-
-
-
-        
-
-
-
-
-
-
-
-
-    
-
-
-    
