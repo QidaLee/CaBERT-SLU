@@ -230,8 +230,8 @@ def test(**kwargs):
     reverse_dic = {v[0]: k for k,v in dic.items()}
     with open(opt.train_path, 'rb') as f:
         train_data = pickle.load(f)
-    with open(opt.test_path, 'rb') as f:
-        test_data = pickle.load(f)
+    # with open(opt.test_path, 'rb') as f:
+    #     test_data = pickle.load(f)
 
     # Microsoft Dialogue Dataset / SGD Dataset
     indices = np.random.permutation(len(train_data))
@@ -274,7 +274,7 @@ def test(**kwargs):
         model.eval()
         ccounter = 0
         stats = defaultdict(Counter)
-        for (result_ids, result_token_masks, result_masks, lengths, result_slot_labels, result_labels) in tqdm(test_loader):
+        for (result_ids, result_token_masks, result_masks, lengths, result_slot_labels, result_labels) in tqdm(test_loader, disable=True):
 
             result_ids = result_ids.to(device)
             result_token_masks = result_token_masks.to(device)
