@@ -5,7 +5,7 @@ class Config:
     datatype = "e2e"
     retrain = False                     # Reuse trained model weights
     test_mode = "validation"  # "validation", "data"
-    data_mode = "single"  # "single"      # single or multi intent in data
+    data_mode = "multi"  # "single"      # single or multi intent in data
     #################################
 
     if datatype == "e2e":
@@ -27,7 +27,7 @@ class Config:
 
     maxlen = 60
     batch_size = 8  # CaBERT-SLU: e2e 16/8 sgd 4  # multi 128 eca 8
-    epochs = 20
+    epochs = 5
     learning_rate_bert = 2e-5  # 1e-3
     learning_rate_classifier = 5e-3
 
