@@ -7,29 +7,22 @@ import torch
 import pickle
 import numpy as np
 from tqdm import tqdm
-from collections import defaultdict, Counter
 from transformers import BertTokenizer, BertConfig
 
-# Import necessary functions from utils.py
+# Import your project modules
 from utils import f1_score_intents, evaluate_iob, prf, load_data
-
-# Import core dependencies from original code
 from model import BertContextNLU
 from all_data_context import get_dataloader_context
 from config import opt
 
 def load_dictionaries():
     """Load intent/slot dictionaries and build reverse mapping (ID to name)"""
-    # Load intent dictionary (intent2id_multi_with_tokens.pkl)
     with open(opt.dic_path_with_tokens, 'rb') as f:
         intent_dic = pickle.load(f)
-    # Reverse mapping: intent ID -> intent name
     intent_id2name = {v[0]: k for k, v in intent_dic.items()}
 
-    # Load slot dictionary (slot2id.pkl)
     with open(opt.slot_path, 'rb') as f:
         slot_dic = pickle.load(f)
-    # Reverse mapping: slot ID -> slot name
     slot_id2name = {v: k for k, v in slot_dic.items()}
 
     return intent_id2name, slot_id2name
@@ -39,7 +32,6 @@ def load_test_data():
     with open(opt.train_path, 'rb') as f:
         train_data = pickle.load(f)
 
-    # Split train/test set by 7:3 with fixed random seed (match original code)
     np.random.seed(0)
     indices = np.random.permutation(len(train_data))
     test_data = np.array(train_data, dtype=object)[indices[int(len(train_data)*0.7):]][:100]
@@ -49,7 +41,6 @@ def init_model(intent_num, slot_num):
     """Initialize model and load pretrained weights"""
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    # Initialize BERT config (match original code/config)
     config = BertConfig(
         vocab_size_or_config_json_file=32000,
         hidden_size=768,
@@ -58,10 +49,8 @@ def init_model(intent_num, slot_num):
         intermediate_size=3072
     )
 
-    # Initialize model
     model = BertContextNLU(config, opt, intent_num, slot_num)
 
-    # Load trained model weights with safe device mapping
     if opt.model_path and os.path.exists(opt.model_path):
         state_dict = torch.load(opt.model_path, map_location=device)
         model.load_state_dict(state_dict)
@@ -70,7 +59,7 @@ def init_model(intent_num, slot_num):
         raise ValueError("Model file does not exist: {}".format(opt.model_path))
 
     model = model.to(device)
-    model.eval()  # Switch to evaluation mode
+    model.eval()
     return model, device
 
 def get_intent_tokens(intent_dic, device):
@@ -78,7 +67,6 @@ def get_intent_tokens(intent_dic, device):
     intent_tokens = [intent for name, (tag, intent) in intent_dic.items()]
     intent_tok, mask_tok = load_data(intent_tokens, 10)
 
-    # Convert to tensor (match original code)
     intent_tokens_tensor = torch.zeros(len(intent_tok), 10).long().to(device)
     mask_tokens_tensor = torch.zeros(len(mask_tok), 10).long().to(device)
     for i in range(len(intent_tok)):
@@ -89,66 +77,72 @@ def get_intent_tokens(intent_dic, device):
     return intent_tokens_tensor, mask_tokens_tensor
 
 def print_prediction_examples(model, test_loader, intent_id2name, slot_id2name, device, intent_tokens, mask_tokens):
-    """Core function: Run test and print specific prediction examples (fixed dimension handling)"""
+    """Core function: Stable version with correct text extraction (2D result_ids)"""
+    # Use the same tokenizer as training
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    all_examples = []  # Store all test examples results
+    all_examples = []
 
-    # Iterate through test data batches (batch size = 8 from config)
+    # Debug: Print first batch dimension info (only once)
+    first_batch = True
+
     for batch_idx, batch in enumerate(tqdm(test_loader, desc="Testing")):
-        # Unpack batch data (match original data loader output exactly)
         result_ids, result_token_masks, result_masks, lengths, result_slot_labels, result_labels = batch
 
-        # Move all tensors to correct device (ensure consistent dimensions)
+        # Move to device
         result_ids = result_ids.to(device)
-        result_token_masks = result_token_masks.to(device)
-        result_masks = result_masks.to(device)
         lengths = lengths.to(device)
-        result_slot_labels = result_slot_labels.to(device)
         result_labels = result_labels.to(device)
 
-        # Critical fix: Get actual batch size from lengths tensor (config batch_size=8)
-        actual_batch_size = lengths.shape[0]
+        # Debug info for first batch
+        if first_batch:
+            print(f"\n=== Debug Info ===")
+            print(f"result_ids shape (2D): {result_ids.shape}")  # Should show [8, xxx] (2D)
+            print(f"lengths values: {lengths.cpu().numpy()[:5]}")
+            first_batch = False
 
-        # Forward pass (no gradient computation)
+        # Get actual batch size (from 2D tensor)
+        actual_batch_size = result_ids.shape[0]
+
         with torch.no_grad():
             outputs, labels, predicted_slot_outputs = model(
-                result_ids, result_token_masks, result_masks, lengths,
-                result_slot_labels, result_labels, intent_tokens, mask_tokens
+                result_ids, result_token_masks.to(device), result_masks.to(device), lengths,
+                result_slot_labels.to(device), result_labels, intent_tokens, mask_tokens
             )
 
-        # Parse results for EACH sample in the batch (0 to actual_batch_size-1 only)
+        # Process each sample (2D tensor compatible)
         for i in range(actual_batch_size):
             try:
-                # 1. Safe length retrieval (absolute protection against out-of-bounds)
-                sample_length = lengths[i].item() if i < lengths.shape[0] else opt.maxlen
-                seq_len = min(sample_length, result_ids.shape[1])
+                # 1. Safe length handling (2D compatible)
+                if i >= lengths.shape[0]:
+                    continue
+                sample_len = lengths[i].item() if lengths[i].item() > 0 else opt.maxlen
 
-                # 2. Correct token ID extraction (handle all dimension cases)
-                # Result_ids shape: [batch_size, maxlen, 1] (from original data loader)
-                if len(result_ids.shape) == 3:
-                    # Extract token IDs and remove padding dimension
-                    text_ids = result_ids[i, :seq_len, 0].squeeze()
+                # 2. Correct token extraction for 2D tensor [batch_size, seq_len]
+                # Directly take the i-th sample (no third dimension!)
+                text_ids = result_ids[i, :sample_len].cpu().numpy()
+
+                # 3. Filter valid tokens (match your load_data function)
+                valid_ids = text_ids[text_ids != 0]  # Remove padding (0)
+
+                # 4. Decode text (guaranteed non-empty)
+                if len(valid_ids) > 0:
+                    text = tokenizer.decode(valid_ids, skip_special_tokens=True).strip()
+                    # Fallback if decode returns empty
+                    text = text if text else f"Valid_IDs: {valid_ids[:5]}"
                 else:
-                    text_ids = result_ids[i, :seq_len]
+                    text = f"No_valid_tokens (len={sample_len})"
 
-                # 3. Safe text decoding (filter invalid tokens)
-                text_ids = text_ids.cpu().numpy()
-                text_ids = text_ids[text_ids != 0]  # Remove padding tokens (0)
-                text = tokenizer.decode(text_ids, skip_special_tokens=True)
-
-                # 4. Parse real intents (multi-intent handling)
+                # 5. Parse intent labels (original working logic)
                 real_intent_ids = torch.where(labels[i] == 1)[0].cpu().numpy()
-                real_intents = [intent_id2name.get(id, "Unknown_ID_{}".format(id)) for id in real_intent_ids]
+                real_intents = [intent_id2name.get(id, f"Unknown_ID_{id}") for id in real_intent_ids]
 
-                # 5. Parse predicted intents (sigmoid threshold = 0.5)
                 pred_intent_logits = torch.sigmoid(outputs[i])
                 pred_intent_ids = torch.where(pred_intent_logits > 0.5)[0].cpu().numpy()
-                pred_intents = [intent_id2name.get(id, "Unknown_ID_{}".format(id)) for id in pred_intent_ids]
+                pred_intents = [intent_id2name.get(id, f"Unknown_ID_{id}") for id in pred_intent_ids]
 
-                # 6. Check if prediction is correct
                 is_correct = set(real_intents) == set(pred_intents)
 
-                # Store results
+                # 6. Save results
                 all_examples.append({
                     "text": text,
                     "real_intent_labels": real_intents,
@@ -156,72 +150,77 @@ def print_prediction_examples(model, test_loader, intent_id2name, slot_id2name, 
                     "is_intent_correct": is_correct
                 })
 
-            except IndexError as e:
-                # Skip problematic sample instead of crashing
-                print("\nWarning: Skipping sample {} in batch {} (IndexError: {})".format(i, batch_idx, e))
+            except Exception as e:
+                # Minimal error handling (only print, don't skip all samples)
+                print(f"\nWarning: Sample {i} in batch {batch_idx} - {str(e)[:80]}")
+                all_examples.append({
+                    "text": f"Error: {str(e)[:50]}",
+                    "real_intent_labels": ["Unknown"],
+                    "predicted_intent_labels": ["Unknown"],
+                    "is_intent_correct": False
+                })
                 continue
 
-    # ========== Print formatted results ==========
+    # Print results (original format)
     print("\n" + "="*100)
     print("Test sample prediction examples (first 10):")
     print("="*100)
     for idx, example in enumerate(all_examples[:10]):
-        print("\n[Sample {}]".format(idx+1))
-        print("Text: {}".format(example['text']))
-        print("Real intent labels: {}".format(example['real_intent_labels']))
-        print("Predicted intent labels: {}".format(example['predicted_intent_labels']))
-        print("Is prediction correct: {}".format(example['is_intent_correct']))
+        print(f"\n[Sample {idx+1}]")
+        print(f"Text: {example['text']}")
+        print(f"Real intent labels: {example['real_intent_labels']}")
+        print(f"Predicted intent labels: {example['predicted_intent_labels']}")
+        print(f"Is prediction correct: {example['is_intent_correct']}")
 
-    # Print error examples (for analysis)
+    # Print error examples
     error_examples = [e for e in all_examples if not e["is_intent_correct"]]
     if error_examples:
         print("\n" + "="*100)
-        print("Incorrect prediction examples (first 5, total {}):".format(len(error_examples)))
+        print(f"Incorrect prediction examples (first 5, total {len(error_examples)}):")
         print("="*100)
         for idx, example in enumerate(error_examples[:5]):
-            print("\n[Error Sample {}]".format(idx+1))
-            print("Text: {}".format(example['text']))
-            print("Real intent labels: {}".format(example['real_intent_labels']))
-            print("Predicted intent labels: {}".format(example['predicted_intent_labels']))
+            print(f"\n[Error Sample {idx+1}]")
+            print(f"Text: {example['text']}")
+            print(f"Real intent labels: {example['real_intent_labels']}")
+            print(f"Predicted intent labels: {example['predicted_intent_labels']}")
 
-    # Print overall statistics
+    # Overall statistics
     total = len(all_examples)
     correct = sum([1 for e in all_examples if e["is_intent_correct"]])
     accuracy = correct / total if total > 0 else 0
     print("\n" + "="*100)
     print("Overall statistics:")
-    print("Total valid test samples: {}".format(total))
-    print("Correct predictions: {}".format(correct))
-    print("Intent prediction accuracy: {:.4f}".format(accuracy))
+    print(f"Total valid test samples: {total}")
+    print(f"Correct predictions: {correct}")
+    print(f"Intent prediction accuracy: {accuracy:.4f}")
     print("="*100)
 
 def main(**kwargs):
-    # 1. Override config parameters with input arguments
+    # Override config parameters
     for k, v in kwargs.items():
         setattr(opt, k, v)
 
-    # 2. Load dictionaries (intent/slot ID to name mapping)
+    # Load dictionaries
     intent_id2name, slot_id2name = load_dictionaries()
     with open(opt.dic_path_with_tokens, 'rb') as f:
         intent_dic = pickle.load(f)
 
-    # 3. Load test data (7:3 split from train data)
+    # Load test data
     test_data = load_test_data()
 
-    # 4. Create data loader (use batch size from config)
+    # Create data loader
     test_loader = get_dataloader_context(test_data, intent_dic, slot_id2name, opt)
 
-    # 5. Initialize model (match intent/slot count from dictionaries)
+    # Initialize model
     model, device = init_model(len(intent_dic), len(slot_id2name))
 
-    # 6. Generate intent tokens (required for model input)
+    # Generate intent tokens
     intent_tokens, mask_tokens = get_intent_tokens(intent_dic, device)
 
-    # 7. Run test and print prediction examples
+    # Run test and print examples
     print_prediction_examples(model, test_loader, intent_id2name, slot_id2name, device, intent_tokens, mask_tokens)
 
 if __name__ == '__main__':
-    # Run with config matching your environment (update paths as needed)
     main(
         model_path="./checkpoints/best_e2e_multi.pth",
         train_path="./data/e2e_dialogue/dialogue_data_multi_with_slots.pkl",
@@ -230,6 +229,6 @@ if __name__ == '__main__':
         datatype="e2e",
         data_mode="multi",
         test_mode="validation",
-        batch_size=8,  # Match config batch size
-        maxlen=60      # Match config max sequence length
+        batch_size=8,
+        maxlen=60
     )
